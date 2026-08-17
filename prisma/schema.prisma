@@ -1,0 +1,628 @@
+// Northern Province Digital Governance Platform - Database Schema
+// PostgreSQL. Multi-province ready: every level is a first-class entity.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// AUTH / RBAC
+// ---------------------------------------------------------------------------
+
+model Role {
+  id          Int          @id @default(autoincrement())
+  slug        String       @unique
+  name        String
+  level       Int // 1=province ... 5=village, 6=citizen
+  description String?
+  permissions Permission[] @relation("RolePermissions")
+  users       User[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Permission {
+  id    Int    @id @default(autoincrement())
+  slug  String @unique
+  name  String
+  roles Role[] @relation("RolePermissions")
+}
+
+model User {
+  id           Int     @id @default(autoincrement())
+  fullName     String
+  username     String  @unique
+  email        String? @unique
+  phone        String?
+  passwordHash String
+  profilePhoto String?
+  roleId       Int
+  role         Role    @relation(fields: [roleId], references: [id])
+
+  // Administrative unit (for admin roles). Exactly one set according to level.
+  provinceId Int?
+  districtId Int?
+  sectorId   Int?
+  cellId     Int?
+  villageId  Int?
+  province   Province? @relation(fields: [provinceId], references: [id])
+  district   District? @relation(fields: [districtId], references: [id])
+  sector     Sector?   @relation(fields: [sectorId], references: [id])
+  cell       Cell?     @relation(fields: [cellId], references: [id])
+  village    Village?  @relation(fields: [villageId], references: [id])
+
+  status              String     @default("ACTIVE")
+  failedLoginAttempts Int        @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  mustChangePassword  Boolean    @default(false)
+  twoFactorEnabled    Boolean    @default(false)
+  twoFactorSecret     String?
+  createdById         Int?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  citizenProfile          Citizen?
+  sessions                Session[]
+  loginHistory            LoginHistory[]
+  passwordResets          PasswordReset[]
+  notifications           Notification[]
+  assignedComplaints      Complaint[]        @relation("AssignedOfficer")
+  assignedServiceRequests ServiceRequest[]   @relation("AssignedRequestOfficer")
+  authoredAnnouncements   Announcement[]
+  authoredReports         Report[]           @relation("ReportAuthor")
+  reviewedReports         Report[]           @relation("ReportReviewer")
+  reportReviews           ReportReview[]
+  authoredProjects        Project[]          @relation("ProjectResponsible")
+  projectUpdates          ProjectUpdate[]
+  escalations             Escalation[]       @relation("EscalationFrom")
+  receivedEscalations     Escalation[]       @relation("EscalationTo")
+  attachments             Attachment[]
+  auditLogs               AuditLog[]
+  complaintComments       ComplaintComment[]
+
+  @@index([roleId])
+  @@index([provinceId])
+  @@index([districtId])
+  @@index([sectorId])
+  @@index([cellId])
+  @@index([villageId])
+}
+
+model Session {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  ip        String?
+  userAgent String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([userId])
+}
+
+model LoginHistory {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email     String
+  ip        String?
+  userAgent String?
+  success   Boolean
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([email])
+}
+
+model PasswordReset {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// ADMINISTRATIVE HIERARCHY
+// ---------------------------------------------------------------------------
+
+model Province {
+  id              Int              @id @default(autoincrement())
+  name            String
+  code            String           @unique
+  districts       District[]
+  users           User[]
+  complaints      Complaint[]
+  serviceRequests ServiceRequest[]
+  reports         Report[]
+  projects        Project[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model District {
+  id              Int              @id @default(autoincrement())
+  provinceId      Int
+  province        Province         @relation(fields: [provinceId], references: [id])
+  name            String
+  code            String           @unique
+  sectors         Sector[]
+  users           User[]
+  complaints      Complaint[]
+  serviceRequests ServiceRequest[]
+  reports         Report[]
+  projects        Project[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([provinceId])
+}
+
+model Sector {
+  id              Int              @id @default(autoincrement())
+  districtId      Int
+  district        District         @relation(fields: [districtId], references: [id])
+  name            String
+  code            String           @unique
+  cells           Cell[]
+  users           User[]
+  complaints      Complaint[]
+  serviceRequests ServiceRequest[]
+  reports         Report[]
+  projects        Project[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([districtId])
+}
+
+model Cell {
+  id              Int              @id @default(autoincrement())
+  sectorId        Int
+  sector          Sector           @relation(fields: [sectorId], references: [id])
+  name            String
+  code            String           @unique
+  villages        Village[]
+  users           User[]
+  complaints      Complaint[]
+  serviceRequests ServiceRequest[]
+  reports         Report[]
+  projects        Project[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([sectorId])
+}
+
+model Village {
+  id              Int              @id @default(autoincrement())
+  cellId          Int
+  cell            Cell             @relation(fields: [cellId], references: [id])
+  name            String
+  code            String           @unique
+  households      Household[]
+  citizens        Citizen[]
+  users           User[]
+  complaints      Complaint[]
+  serviceRequests ServiceRequest[]
+  reports         Report[]
+  projects        Project[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([cellId])
+}
+
+// ---------------------------------------------------------------------------
+// CITIZEN DATA
+// ---------------------------------------------------------------------------
+
+model Household {
+  id          Int       @id @default(autoincrement())
+  villageId   Int
+  village     Village   @relation(fields: [villageId], references: [id])
+  code        String    @unique
+  headName    String
+  members     Int       @default(1)
+  createdById Int?
+  citizens    Citizen[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([villageId])
+}
+
+model Citizen {
+  id          Int        @id @default(autoincrement())
+  userId      Int        @unique
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  villageId   Int
+  village     Village    @relation(fields: [villageId], references: [id])
+  householdId Int?
+  household   Household? @relation(fields: [householdId], references: [id])
+  nationalId  String?    @unique
+  dateOfBirth DateTime?
+  gender      String?
+  address     String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  complaints         Complaint[]
+  serviceRequests    ServiceRequest[]
+  eventRegistrations EventParticipant[]
+
+  @@index([villageId])
+}
+
+// ---------------------------------------------------------------------------
+// COMPLAINTS
+// ---------------------------------------------------------------------------
+
+model ComplaintCategory {
+  id         Int         @id @default(autoincrement())
+  name       String
+  slug       String      @unique
+  complaints Complaint[]
+}
+
+model Complaint {
+  id          Int               @id @default(autoincrement())
+  complaintNo String            @unique @default(cuid())
+  citizenId   Int
+  citizen     Citizen           @relation(fields: [citizenId], references: [id])
+  categoryId  Int
+  category    ComplaintCategory @relation(fields: [categoryId], references: [id])
+  title       String
+  description String
+  location    String?
+
+  // Denormalized hierarchy (scalars only) for fast + safe scoping
+  provinceId Int
+  districtId Int
+  sectorId   Int
+  cellId     Int
+  villageId  Int
+
+  priority          String            @default("MEDIUM")
+  status            String            @default("SUBMITTED")
+  assignedOfficerId Int?
+  assignedOfficer   User?             @relation("AssignedOfficer", fields: [assignedOfficerId], references: [id])
+  resolution        String?
+  resolvedById      Int?
+  resolutionDate    DateTime?
+  currentLevel      Int               @default(5) // 1..5 - administrative level currently handling
+
+  comments  ComplaintComment[]
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  province  Province           @relation(fields: [provinceId], references: [id])
+  district  District           @relation(fields: [districtId], references: [id])
+  sector    Sector             @relation(fields: [sectorId], references: [id])
+  cell      Cell               @relation(fields: [cellId], references: [id])
+  village   Village            @relation(fields: [villageId], references: [id])
+
+  @@index([villageId])
+  @@index([citizenId])
+  @@index([status])
+  @@index([provinceId, districtId, sectorId, cellId, villageId])
+}
+
+model ComplaintComment {
+  id          Int       @id @default(autoincrement())
+  complaintId Int
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id])
+  comment     String
+  createdAt   DateTime  @default(now())
+
+  @@index([complaintId])
+}
+
+// ---------------------------------------------------------------------------
+// SERVICE REQUESTS
+// ---------------------------------------------------------------------------
+
+model ServiceType {
+  id              Int              @id @default(autoincrement())
+  name            String
+  slug            String           @unique
+  serviceRequests ServiceRequest[]
+}
+
+model ServiceRequest {
+  id            Int         @id @default(autoincrement())
+  requestNo     String      @unique @default(cuid())
+  citizenId     Int
+  citizen       Citizen     @relation(fields: [citizenId], references: [id])
+  serviceTypeId Int
+  serviceType   ServiceType @relation(fields: [serviceTypeId], references: [id])
+  title         String
+  description   String
+  location      String?
+
+  provinceId Int
+  districtId Int
+  sectorId   Int
+  cellId     Int
+  villageId  Int
+
+  status            String        @default("SUBMITTED")
+  assignedOfficerId Int?
+  assignedOfficer   User?         @relation("AssignedRequestOfficer", fields: [assignedOfficerId], references: [id])
+  resolution        String?
+  resolutionDate    DateTime?
+  currentLevel      Int           @default(5)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  province  Province @relation(fields: [provinceId], references: [id])
+  district  District @relation(fields: [districtId], references: [id])
+  sector    Sector   @relation(fields: [sectorId], references: [id])
+  cell      Cell     @relation(fields: [cellId], references: [id])
+  village   Village  @relation(fields: [villageId], references: [id])
+
+  @@index([villageId])
+  @@index([citizenId])
+  @@index([status])
+}
+
+// Escalation history shared by complaints and service requests
+model Escalation {
+  id         Int              @id @default(autoincrement())
+  entity     String
+  entityId   Int
+  fromLevel  Int
+  toLevel    Int
+  fromUserId Int
+  fromUser   User             @relation("EscalationFrom", fields: [fromUserId], references: [id])
+  toUserId   Int?
+  toUser     User?            @relation("EscalationTo", fields: [toUserId], references: [id])
+  reason     String
+  status     String            @default("PENDING")
+  resolvedAt DateTime?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@index([entity, entityId])
+  @@index([toLevel])
+}
+
+// ---------------------------------------------------------------------------
+// REPORTS
+// ---------------------------------------------------------------------------
+
+model Report {
+  id       Int         @id @default(autoincrement())
+  reportNo String      @unique @default(cuid())
+  title    String
+  content  String
+  level    String
+  authorId Int
+  author   User        @relation("ReportAuthor", fields: [authorId], references: [id])
+
+  provinceId Int
+  districtId Int
+  sectorId   Int
+  cellId     Int
+  villageId  Int
+
+  status        String       @default("DRAFT")
+  submittedAt   DateTime?
+  reviewedById  Int?
+  reviewedBy    User?        @relation("ReportReviewer", fields: [reviewedById], references: [id])
+  reviewedAt    DateTime?
+  reviewComment String?
+  version       Int          @default(1)
+
+  reviews   ReportReview[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  province  Province       @relation(fields: [provinceId], references: [id])
+  district  District       @relation(fields: [districtId], references: [id])
+  sector    Sector         @relation(fields: [sectorId], references: [id])
+  cell      Cell           @relation(fields: [cellId], references: [id])
+  village   Village        @relation(fields: [villageId], references: [id])
+
+  @@index([level])
+  @@index([authorId])
+  @@index([status])
+}
+
+model ReportReview {
+  id         Int      @id @default(autoincrement())
+  reportId   Int
+  report     Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  reviewerId Int
+  reviewer   User     @relation(fields: [reviewerId], references: [id])
+  action     String // APPROVED | REJECTED | REVISION
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  @@index([reportId])
+}
+
+// ---------------------------------------------------------------------------
+// ANNOUNCEMENTS
+// ---------------------------------------------------------------------------
+
+model Announcement {
+  id              Int                @id @default(autoincrement())
+  title           String
+  content         String
+  authorId        Int
+  author          User               @relation(fields: [authorId], references: [id])
+  targetLevel     Int // 1=province 2=district 3=sector 4=cell 5=village 6=citizens
+  scopeAll        Boolean            @default(true)
+  provinceId      Int?
+  districtId      Int?
+  sectorId        Int?
+  cellId          Int?
+  villageId       Int?
+  status          String              @default("PUBLISHED")
+  publicationDate DateTime           @default(now())
+  expirationDate  DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([targetLevel])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// DEVELOPMENT PROJECTS
+// ---------------------------------------------------------------------------
+
+model Project {
+  id          Int     @id @default(autoincrement())
+  title       String
+  description String
+  location    String?
+
+  provinceId Int
+  districtId Int
+  sectorId   Int
+  cellId     Int
+  villageId  Int
+
+  level                Int           @default(5) // level that owns the project
+  responsibleOfficerId Int?
+  responsibleOfficer   User?         @relation("ProjectResponsible", fields: [responsibleOfficerId], references: [id])
+  startDate            DateTime?
+  expectedEndDate      DateTime?
+  budget               Decimal       @default(0)
+  fundingSource        String?
+  progress             Int           @default(0) // 0-100
+  status               String        @default("PLANNED")
+  beneficiaries        Int           @default(0)
+
+  updates   ProjectUpdate[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  province  Province        @relation(fields: [provinceId], references: [id])
+  district  District        @relation(fields: [districtId], references: [id])
+  sector    Sector          @relation(fields: [sectorId], references: [id])
+  cell      Cell            @relation(fields: [cellId], references: [id])
+  village   Village         @relation(fields: [villageId], references: [id])
+
+  @@index([villageId])
+  @@index([status])
+}
+
+model ProjectUpdate {
+  id        Int      @id @default(autoincrement())
+  projectId Int
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId  Int
+  author    User     @relation(fields: [authorId], references: [id])
+  content   String
+  progress  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+}
+
+// ---------------------------------------------------------------------------
+// COMMUNITY EVENTS
+// ---------------------------------------------------------------------------
+
+model Event {
+  id           Int                @id @default(autoincrement())
+  title        String
+  description  String
+  eventDate    DateTime
+  location     String?
+  organizer    String?
+  provinceId   Int?
+  districtId   Int?
+  sectorId     Int?
+  cellId       Int?
+  villageId    Int?
+  status       String             @default("PLANNED")
+  report       String?
+  participants EventParticipant[]
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([eventDate])
+  @@index([villageId])
+}
+
+model EventParticipant {
+  id        Int      @id @default(autoincrement())
+  eventId   Int
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  citizenId Int?
+  citizen   Citizen? @relation(fields: [citizenId], references: [id])
+  name      String?
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
+}
+
+// ---------------------------------------------------------------------------
+// NOTIFICATIONS
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  content   String
+  type      String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([readAt])
+}
+
+// ---------------------------------------------------------------------------
+// ATTACHMENTS & AUDIT
+// ---------------------------------------------------------------------------
+
+model Attachment {
+  id           Int      @id @default(autoincrement())
+  entity       String // COMPLAINT | SERVICE_REQUEST | REPORT | ANNOUNCEMENT | PROJECT | EVENT
+  entityId     Int
+  fileName     String
+  filePath     String
+  mimeType     String
+  size         Int
+  uploadedById Int?
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@index([entity, entityId])
+}
+
+model AuditLog {
+  id            Int      @id @default(autoincrement())
+  userId        Int?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action        String
+  entity        String?
+  entityId      Int?
+  previousValue String?
+  newValue      String?
+  ip            String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
