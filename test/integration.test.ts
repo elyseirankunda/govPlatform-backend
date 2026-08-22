@@ -120,7 +120,7 @@ beforeAll(async () => {
   const dbPath = path.join(__dirname, '..', 'prisma', 'test.db');
   if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
 
-  execSync('npx prisma db push --skip-generate --accept-data-loss', {
+  execSync('node node_modules/prisma/build/index.js db push --skip-generate --accept-data-loss', {
     stdio: 'pipe',
     cwd: path.join(__dirname, '..'),
   });
@@ -128,7 +128,7 @@ beforeAll(async () => {
   const { createApp } = await import('../src/app');
   app = createApp();
   ({ prisma } = await import('../src/lib/prisma'));
-}, 120000);
+}, 300000);
 
 let testData: any;
 beforeAll(async () => {

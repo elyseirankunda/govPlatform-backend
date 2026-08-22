@@ -62,13 +62,13 @@ router.get(
     const vWhere = villageScopeWhere(scope);
 
     // ---------- aggregates ----------
-    const [households, citizens, complaints, requests, projects, events, reports, escalations] =
+    const [households, citizens, complaints, requests, projects, events, reports, escalations, feedbacks, categories] =
       await Promise.all([
         prisma.household.count({ where: vWhere }),
         prisma.citizen.count({ where: vWhere }),
         prisma.complaint.findMany({
           where,
-          select: { id: true, status: true, priority: true, createdAt: true },
+          select: { id: true, status: true, priority: true, categoryId: true, createdAt: true },
         }),
         prisma.serviceRequest.findMany({
           where,
@@ -76,11 +76,13 @@ router.get(
         }),
         prisma.project.findMany({
           where,
-          select: { id: true, status: true, budget: true, progress: true, createdAt: true },
+          select: { id: true, status: true, budget: true, budgetSpent: true, progress: true, createdAt: true },
         }),
         prisma.event.count({ where: scope.level === 6 ? { villageId: scope.villageId ?? -1 } : visibleEventWhere(scope) }),
         prisma.report.count({ where }),
         prisma.escalation.count({ where: { fromLevel: { gt: 0 }, status: 'PENDING' } }),
+        prisma.complaintFeedback.findMany({ where: { complaint: where }, select: { rating: true } }),
+        prisma.complaintCategory.findMany({ select: { id: true, name: true } }),
       ]);
 
     const openComplaints = complaints.filter((c) => !['RESOLVED', 'CLOSED'].includes(c.status)).length;
@@ -92,7 +94,9 @@ router.get(
     const plannedProjects = projects.filter((p) => p.status === 'PLANNED').length;
     const completedProjects = projects.filter((p) => p.status === 'COMPLETED').length;
     const totalBudget = projects.reduce((s, p) => s + Number(p.budget || 0), 0);
+    const totalSpent = projects.reduce((s, p) => s + Number(p.budgetSpent || 0), 0);
     const avgProgress = projects.length ? Math.round(projects.reduce((s, p) => s + p.progress, 0) / projects.length) : 0;
+    const avgSatisfaction = feedbacks.length ? Math.round((feedbacks.reduce((s, f) => s + f.rating, 0) / feedbacks.length) * 20) : 0;
 
     const recentComplaints = await prisma.complaint.findMany({
       where,
@@ -138,7 +142,10 @@ router.get(
         completedProjects,
         totalProjects: projects.length,
         totalBudget,
+        totalSpent,
         avgProgress,
+        avgSatisfaction,
+        feedbackCount: feedbacks.length,
         events,
         reports: reports,
       },
@@ -148,6 +155,7 @@ router.get(
         projectsByStatus: groupBy(projects, 'status'),
         complaintsLast30Days: complaintsByDay(complaints),
         requestsLast30Days: complaintsByDay(requests),
+        complaintsByCategory: groupByCategory(complaints, categories),
       },
       recent: { complaints: recentComplaints, reports: recentReports, projects: recentProjects },
     };
@@ -218,6 +226,16 @@ function groupBy(items: any[], key: string): Record<string, number> {
   const out: Record<string, number> = {};
   for (const item of items) {
     const k = item[key];
+    out[k] = (out[k] ?? 0) + 1;
+  }
+  return out;
+}
+
+function groupByCategory(items: any[], categories: { id: number; name: string }[]): Record<string, number> {
+  const names = new Map(categories.map((c) => [c.id, c.name]));
+  const out: Record<string, number> = {};
+  for (const item of items) {
+    const k = names.get(item.categoryId) ?? `Category ${item.categoryId}`;
     out[k] = (out[k] ?? 0) + 1;
   }
   return out;

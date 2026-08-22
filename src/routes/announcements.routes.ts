@@ -8,6 +8,7 @@ import { audit } from '../middleware/audit';
 import { getScope, scopeVillageIds, assertInScope } from '../services/scope.service';
 import { notify, notifyLevel } from '../services/notify.service';
 import { parsePagination, pageResponse } from '../utils/pagination';
+import { sortBy } from '../utils/sort';
 
 const router = Router();
 router.use(authenticate);
@@ -23,6 +24,7 @@ const createSchema = z.object({
   cellId: z.number().int().optional(),
   villageId: z.number().int().optional(),
   expirationDate: z.string().optional(),
+  publicationDate: z.string().optional(),
 });
 
 const statusSchema = z.object({ status: z.enum(['DRAFT', 'PUBLISHED', 'EXPIRED', 'ARCHIVED']) });
@@ -125,8 +127,8 @@ router.post(
         sectorId: data.sectorId ?? undefined,
         cellId: data.cellId ?? undefined,
         villageId: data.villageId ?? undefined,
-        status: 'PUBLISHED',
-        publicationDate: new Date(),
+        status: data.publicationDate && new Date(data.publicationDate) > new Date() ? 'SCHEDULED' : 'PUBLISHED',
+        publicationDate: data.publicationDate ? new Date(data.publicationDate) : new Date(),
         expirationDate: data.expirationDate ? new Date(data.expirationDate) : null,
       },
       include: { author: { select: { fullName: true } } },
@@ -153,18 +155,31 @@ router.get(
 
     const recent = await prisma.announcement.findMany({
       where: {
-        status: req.query.status ? String(req.query.status) : 'PUBLISHED',
+        status: req.query.status
+          ? String(req.query.status)
+          : scope.level < 6
+          ? { in: ['PUBLISHED', 'SCHEDULED'] }
+          : 'PUBLISHED',
         ...(req.query.q ? { title: { contains: String(req.query.q) } } : {}),
       },
       include: { author: { select: { id: true, fullName: true } } },
-      orderBy: { publicationDate: 'desc' },
+      orderBy: sortBy(req.query.sort, {
+        oldest: { publicationDate: 'asc' },
+        title: { title: 'asc' },
+      }),
       take: 500,
     });
 
     const visible = recent
       .filter((a) => isVisible(a, scope))
       .filter((a) => {
-        if (a.expirationDate && a.expirationDate < new Date()) {
+        const now = new Date();
+        if (a.status === 'SCHEDULED' && a.publicationDate <= now) {
+          void prisma.announcement.update({ where: { id: a.id }, data: { status: 'PUBLISHED' } });
+          return true;
+        }
+        if (a.status === 'SCHEDULED' && scope.level === 6) return false;
+        if (a.expirationDate && a.expirationDate < now) {
           if (a.status === 'PUBLISHED') void prisma.announcement.update({ where: { id: a.id }, data: { status: 'EXPIRED' } });
           return false;
         }
@@ -209,6 +224,20 @@ router.put(
 
     const updated = await prisma.announcement.update({ where: { id: announcement.id }, data: { status: req.body.status } });
     await audit(req, `ANNOUNCEMENT_${req.body.status}`, 'ANNOUNCEMENT', announcement.id, { status: announcement.status }, { status: req.body.status });
+    if (req.body.status === 'PUBLISHED') {
+      await notifyLevel(
+        announcement.targetLevel,
+        announcement.provinceId ?? 0,
+        announcement.districtId ?? 0,
+        announcement.sectorId ?? 0,
+        announcement.cellId ?? 0,
+        announcement.villageId ?? 0,
+        'New announcement',
+        announcement.title,
+        'ANNOUNCEMENT',
+        `/announcements/${announcement.id}`,
+      );
+    }
     res.json({ announcement: updated });
   }),
 );

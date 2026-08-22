@@ -85,6 +85,9 @@ model User {
   attachments             Attachment[]
   auditLogs               AuditLog[]
   complaintComments       ComplaintComment[]
+  tasks                   Task[]            @relation("TaskAssignee")
+  assignedTasks           Task[]            @relation("TaskAssigner")
+  meetingsHeld            Meeting[]         @relation("MeetingHeldBy")
 
   @@index([roleId])
   @@index([provinceId])
@@ -148,6 +151,7 @@ model Province {
   serviceRequests ServiceRequest[]
   reports         Report[]
   projects        Project[]
+  meetings        Meeting[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 }
@@ -164,6 +168,7 @@ model District {
   serviceRequests ServiceRequest[]
   reports         Report[]
   projects        Project[]
+  meetings        Meeting[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
@@ -182,6 +187,7 @@ model Sector {
   serviceRequests ServiceRequest[]
   reports         Report[]
   projects        Project[]
+  meetings        Meeting[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
@@ -200,6 +206,7 @@ model Cell {
   serviceRequests ServiceRequest[]
   reports         Report[]
   projects        Project[]
+  meetings        Meeting[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
@@ -219,6 +226,8 @@ model Village {
   serviceRequests ServiceRequest[]
   reports         Report[]
   projects        Project[]
+  meetings        Meeting[]
+  cooperatives    Cooperative[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
@@ -236,6 +245,7 @@ model Household {
   code        String    @unique
   headName    String
   members     Int       @default(1)
+  ubudehe     String?
   createdById Int?
   citizens    Citizen[]
   createdAt   DateTime  @default(now())
@@ -262,6 +272,7 @@ model Citizen {
   complaints         Complaint[]
   serviceRequests    ServiceRequest[]
   eventRegistrations EventParticipant[]
+  feedbacks          ComplaintFeedback[]
 
   @@index([villageId])
 }
@@ -305,6 +316,7 @@ model Complaint {
   currentLevel      Int               @default(5) // 1..5 - administrative level currently handling
 
   comments  ComplaintComment[]
+  feedback  ComplaintFeedback?
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
   province  Province           @relation(fields: [provinceId], references: [id])
@@ -503,6 +515,7 @@ model Project {
   startDate            DateTime?
   expectedEndDate      DateTime?
   budget               Decimal       @default(0)
+  budgetSpent          Decimal       @default(0)
   fundingSource        String?
   progress             Int           @default(0) // 0-100
   status               String        @default("PLANNED")
@@ -617,6 +630,8 @@ model AuditLog {
   action        String
   entity        String?
   entityId      Int?
+  method        String?
+  path          String?
   previousValue String?
   newValue      String?
   ip            String?
@@ -625,4 +640,96 @@ model AuditLog {
   @@index([userId])
   @@index([entity, entityId])
   @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// CITIZEN FEEDBACK & SATISFACTION
+// ---------------------------------------------------------------------------
+
+model ComplaintFeedback {
+  id          Int       @id @default(autoincrement())
+  complaintId Int       @unique
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  citizenId   Int
+  citizen     Citizen   @relation(fields: [citizenId], references: [id])
+  rating      Int // 1..5
+  comment     String?
+  createdAt   DateTime  @default(now())
+
+  @@index([citizenId])
+}
+
+// ---------------------------------------------------------------------------
+// LEADER TASKS
+// ---------------------------------------------------------------------------
+
+model Task {
+  id           Int       @id @default(autoincrement())
+  title        String
+  description  String?
+  assigneeId   Int
+  assignee     User      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  assignedById Int?
+  assignedBy   User?     @relation("TaskAssigner", fields: [assignedById], references: [id])
+  status       String    @default("OPEN") // OPEN | IN_PROGRESS | COMPLETED
+  priority     String    @default("MEDIUM")
+  dueDate      DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([assigneeId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// TOWN-HALL MEETINGS
+// ---------------------------------------------------------------------------
+
+model Meeting {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  meetingDate DateTime
+  location    String?
+  agenda      String?
+  minutes     String?
+  organizer   String?
+  provinceId  Int?
+  districtId  Int?
+  sectorId    Int?
+  cellId      Int?
+  villageId   Int?
+  province    Province? @relation(fields: [provinceId], references: [id])
+  district    District? @relation(fields: [districtId], references: [id])
+  sector      Sector?   @relation(fields: [sectorId], references: [id])
+  cell        Cell?     @relation(fields: [cellId], references: [id])
+  village     Village?  @relation(fields: [villageId], references: [id])
+  status      String    @default("PLANNED") // PLANNED | HELD | CANCELLED
+  heldById    Int?
+  heldBy      User?     @relation("MeetingHeldBy", fields: [heldById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([meetingDate])
+  @@index([villageId])
+}
+
+// ---------------------------------------------------------------------------
+// COOPERATIVES (SOCIO-ECONOMIC GROUPS)
+// ---------------------------------------------------------------------------
+
+model Cooperative {
+  id           Int      @id @default(autoincrement())
+  name         String
+  description  String?
+  villageId    Int
+  village      Village  @relation(fields: [villageId], references: [id])
+  activity     String?
+  leaderName   String?
+  membersCount Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([villageId])
 }

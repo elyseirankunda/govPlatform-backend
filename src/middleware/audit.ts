@@ -15,6 +15,8 @@ export async function audit(
 ) {
   const userId = req.user?.id ?? null;
   const ip = req.ip ?? null;
+  const method = req.method;
+  const path = req.originalUrl.split('?')[0];
 
   try {
     await prisma.auditLog.create({
@@ -23,6 +25,8 @@ export async function audit(
         action,
         entity,
         entityId: entityId ?? null,
+        method,
+        path,
         previousValue: previous === undefined ? undefined : typeof previous === 'string' ? previous : JSON.stringify(previous),
         newValue: next === undefined ? undefined : typeof next === 'string' ? next : JSON.stringify(next),
         ip,

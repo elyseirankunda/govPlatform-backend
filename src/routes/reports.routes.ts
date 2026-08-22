@@ -8,6 +8,8 @@ import { audit } from '../middleware/audit';
 import { getScope, scopeVillageIds, assertInScope, reportsToLevel } from '../services/scope.service';
 import { notifyLevel } from '../services/notify.service';
 import { parsePagination, pageResponse } from '../utils/pagination';
+import { toCsv, sendCsv } from '../utils/csv';
+import { sortBy } from '../utils/sort';
 
 const router = Router();
 router.use(authenticate);
@@ -83,13 +85,45 @@ router.get(
       }
     }
     if (req.query.status) where.status = String(req.query.status);
+    if (req.query.level) {
+      const lvl = String(req.query.level).toUpperCase();
+      if (Array.isArray(where.AND)) where.AND.push({ level: lvl });
+      else where.level = lvl;
+    }
+    if (req.query.q) {
+      const q = String(req.query.q);
+      where.OR = [
+        ...(Array.isArray(where.OR) ? where.OR : []),
+        { title: { contains: q } },
+        { reportNo: { contains: q } },
+      ];
+    }
+
+    if (String(req.query.export).toLowerCase() === 'csv') {
+      const rows = await prisma.report.findMany({
+        where,
+        include: { author: { select: { fullName: true } }, village: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      const csv = toCsv(
+        ['Report No', 'Title', 'Level', 'Status', 'Author', 'Village', 'Created'],
+        rows.map((r) => [r.reportNo, r.title, r.level, r.status, r.author.fullName, r.village?.name ?? '', r.createdAt.toISOString()]),
+      );
+      return sendCsv(res, 'reports.csv', csv);
+    }
+
+    const orderBy = sortBy(req.query.sort, {
+      oldest: { createdAt: 'asc' },
+      status: [{ status: 'asc' }, { createdAt: 'desc' }],
+      title: { title: 'asc' },
+    });
 
     const [total, items] = await Promise.all([
       prisma.report.count({ where }),
       prisma.report.findMany({
         where,
         include: includeForList(),
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take: limit,
       }),

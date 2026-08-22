@@ -23,14 +23,31 @@ router.get(
     });
     const userIds = scopedUserIds.map((u) => u.id).concat(req.user!.id);
 
-    const where = {
-      OR: [
-        { userId: { in: userIds } },
-        ...(scope.level === 1
-          ? [{ entity: { in: ['COMPLAINT', 'SERVICE_REQUEST', 'REPORT', 'PROJECT', 'ANNOUNCEMENT', 'EVENT'] } }]
-          : [{ entity: 'USER' }]),
+    const where: any = {
+      AND: [
+        {
+          OR: [
+            { userId: { in: userIds } },
+            ...(scope.level === 1
+              ? [{ entity: { in: ['COMPLAINT', 'SERVICE_REQUEST', 'REPORT', 'PROJECT', 'ANNOUNCEMENT', 'EVENT'] } }]
+              : [{ entity: 'USER' }]),
+          ],
+        },
       ],
     };
+
+    const q = req.query.q ? String(req.query.q).trim() : '';
+    if (q) {
+      where.AND.push({
+        OR: [
+          { action: { contains: q } },
+          { entity: { contains: q } },
+          { method: { contains: q } },
+          { path: { contains: q } },
+          { user: { fullName: { contains: q } } },
+        ],
+      });
+    }
 
     const [total, items] = await Promise.all([
       prisma.auditLog.count({ where }),

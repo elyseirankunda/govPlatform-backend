@@ -1,13 +1,15 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { asyncHandler, badRequest, forbidden, notFound } from '../lib/httpError';
+import { asyncHandler, badRequest, conflict, forbidden, notFound } from '../lib/httpError';
 import { validate } from '../middleware/validate';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { audit } from '../middleware/audit';
 import { getScope, scopeVillageIds, assertInScope } from '../services/scope.service';
 import { notify, notifyLevel } from '../services/notify.service';
 import { parsePagination, pageResponse } from '../utils/pagination';
+import { toCsv, sendCsv } from '../utils/csv';
+import { sortBy } from '../utils/sort';
 
 const router = Router();
 router.use(authenticate);
@@ -32,6 +34,11 @@ const escalateSchema = z.object({ reason: z.string().min(5) });
 
 const commentSchema = z.object({ comment: z.string().min(1).max(2000) });
 
+const feedbackSchema = z.object({
+  rating: z.number().int().min(1).max(5),
+  comment: z.string().max(1000).optional().or(z.literal('')),
+});
+
 const listQuerySchema = z.object({
   status: z.string().optional(),
   categoryId: z.coerce.number().int().optional(),
@@ -53,6 +60,7 @@ async function loadComplaint(id: number, includeAll = false) {
       assignedOfficer: { select: { id: true, fullName: true } },
       village: { include: { cell: { include: { sector: { include: { district: { include: { province: true } } } } } } } },
       comments: { include: { user: { select: { id: true, fullName: true, role: { select: { name: true } } } } }, orderBy: { createdAt: 'asc' } },
+      feedback: true,
     },
   });
   if (!complaint) return complaint;
@@ -149,6 +157,25 @@ router.get(
       where.OR = [{ title: { contains: query.q } }, { complaintNo: { contains: query.q } }];
     }
 
+    if (String(req.query.export).toLowerCase() === 'csv') {
+      const rows = await prisma.complaint.findMany({
+        where,
+        include: { category: true, citizen: { include: { user: { select: { fullName: true } } } }, village: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      const csv = toCsv(
+        ['Complaint No', 'Title', 'Category', 'Priority', 'Status', 'Citizen', 'Village', 'Created'],
+        rows.map((c) => [c.complaintNo, c.title, c.category.name, c.priority, c.status, c.citizen.user.fullName, c.village.name, c.createdAt.toISOString()]),
+      );
+      return sendCsv(res, 'complaints.csv', csv);
+    }
+
+    const orderBy = sortBy(req.query.sort, {
+      oldest: { createdAt: 'asc' },
+      status: [{ status: 'asc' }, { createdAt: 'desc' }],
+      priority: [{ priority: 'asc' }, { createdAt: 'desc' }],
+    });
+
     const [total, items] = await Promise.all([
       prisma.complaint.count({ where }),
       prisma.complaint.findMany({
@@ -159,7 +186,7 @@ router.get(
           assignedOfficer: { select: { id: true, fullName: true } },
           village: { select: { id: true, name: true } },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take: limit,
       }),
@@ -303,6 +330,37 @@ router.post(
     });
     await audit(req, 'COMPLAINT_COMMENT', 'COMPLAINT', complaint.id);
     res.status(201).json({ comment });
+  }),
+);
+
+router.post(
+  '/:id/feedback',
+  validate(feedbackSchema),
+  asyncHandler(async (req, res) => {
+    const complaint = await prisma.complaint.findUnique({ where: { id: Number(req.params.id) } });
+    if (!complaint) throw notFound('Complaint not found');
+
+    const scope = await getScope(req.user!.id);
+    if (scope.level !== 6 || complaint.citizenId !== scope.citizenId) {
+      throw forbidden('Only the citizen who filed this complaint can give feedback');
+    }
+    if (!['RESOLVED', 'CLOSED'].includes(complaint.status)) {
+      throw badRequest('Feedback is available only after the complaint is resolved');
+    }
+
+    const existing = await prisma.complaintFeedback.findUnique({ where: { complaintId: complaint.id } });
+    if (existing) throw conflict('You already gave feedback for this complaint');
+
+    const feedback = await prisma.complaintFeedback.create({
+      data: {
+        complaintId: complaint.id,
+        citizenId: scope.citizenId,
+        rating: req.body.rating,
+        comment: req.body.comment || null,
+      },
+    });
+    await audit(req, 'COMPLAINT_FEEDBACK', 'COMPLAINT', complaint.id, null, { rating: req.body.rating });
+    res.status(201).json({ feedback });
   }),
 );
 

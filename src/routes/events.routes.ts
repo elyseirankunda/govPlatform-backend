@@ -7,6 +7,7 @@ import { authenticate, requirePermission } from '../middleware/auth';
 import { audit } from '../middleware/audit';
 import { getScope, scopeVillageIds, assertInScope } from '../services/scope.service';
 import { parsePagination, pageResponse } from '../utils/pagination';
+import { sortBy } from '../utils/sort';
 
 const router = Router();
 router.use(authenticate);
@@ -99,10 +100,14 @@ router.get(
 
     const where = { ...visibleScope(scope) };
     if (req.query.status) where.status = String(req.query.status);
+    const orderBy = sortBy(req.query.sort, {
+      oldest: { eventDate: 'asc' },
+      name: { title: 'asc' },
+    });
 
     const [total, items] = await Promise.all([
       prisma.event.count({ where }),
-      prisma.event.findMany({ where, orderBy: { eventDate: 'desc' }, skip, take: limit }),
+      prisma.event.findMany({ where, orderBy, skip, take: limit }),
     ]);
     res.json(pageResponse(items, total, page, limit));
   }),

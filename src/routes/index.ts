@@ -13,6 +13,10 @@ import dashboardRoutes from './dashboard.routes';
 import auditRoutes from './audit.routes';
 import uploadRoutes from './upload.routes';
 import citizenRoutes from './citizens.routes';
+import taskRoutes from './tasks.routes';
+import meetingRoutes from './meetings.routes';
+import cooperativeRoutes from './cooperatives.routes';
+import realtimeRoutes from './realtime.routes';
 
 const router = Router();
 
@@ -30,6 +34,10 @@ router.use('/dashboard', dashboardRoutes);
 router.use('/audit-logs', auditRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/citizens', citizenRoutes);
+router.use('/tasks', taskRoutes);
+router.use('/meetings', meetingRoutes);
+router.use('/cooperatives', cooperativeRoutes);
+router.use('/realtime', realtimeRoutes);
 
 router.get('/', (_req, res) => {
   res.json({ name: 'Northern Province Governance API', version: 'v1' });

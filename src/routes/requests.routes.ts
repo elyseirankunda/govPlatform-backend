@@ -8,6 +8,8 @@ import { audit } from '../middleware/audit';
 import { getScope, scopeVillageIds, assertInScope } from '../services/scope.service';
 import { notify, notifyLevel } from '../services/notify.service';
 import { parsePagination, pageResponse } from '../utils/pagination';
+import { toCsv, sendCsv } from '../utils/csv';
+import { sortBy } from '../utils/sort';
 
 const router = Router();
 router.use(authenticate);
@@ -129,6 +131,24 @@ router.get(
       where.OR = [{ title: { contains: String(req.query.q) } }, { requestNo: { contains: String(req.query.q) } }];
     }
 
+    if (String(req.query.export).toLowerCase() === 'csv') {
+      const rows = await prisma.serviceRequest.findMany({
+        where,
+        include: { serviceType: true, citizen: { include: { user: { select: { fullName: true } } } }, village: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      const csv = toCsv(
+        ['Request No', 'Title', 'Service Type', 'Status', 'Citizen', 'Village', 'Created'],
+        rows.map((r) => [r.requestNo, r.title, r.serviceType.name, r.status, r.citizen.user.fullName, r.village.name, r.createdAt.toISOString()]),
+      );
+      return sendCsv(res, 'requests.csv', csv);
+    }
+
+const orderBy = sortBy(req.query.sort, {
+      oldest: { createdAt: 'asc' },
+      status: [{ status: 'asc' }, { createdAt: 'desc' }],
+    });
+
     const [total, items] = await Promise.all([
       prisma.serviceRequest.count({ where }),
       prisma.serviceRequest.findMany({
@@ -139,7 +159,7 @@ router.get(
           village: { select: { id: true, name: true } },
           assignedOfficer: { select: { id: true, fullName: true } },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take: limit,
       }),

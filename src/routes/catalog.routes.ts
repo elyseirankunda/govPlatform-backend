@@ -106,7 +106,15 @@ router.get(
   authenticate,
   asyncHandler(async (req, res) => {
     const scope = await getScope(req.user!.id);
-    res.json({ scope });
+    let village: { id: number; name: string } | null = null;
+    if (scope.level >= 5 && scope.villageId) {
+      const v = await prisma.village.findUnique({
+        where: { id: scope.villageId },
+        select: { id: true, name: true },
+      });
+      village = v;
+    }
+    res.json({ scope, village });
   }),
 );
 

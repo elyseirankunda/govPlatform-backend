@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { ssePublish } from './realtime.service';
 
 /** Creates an in-app notification for a user. */
 export async function notify(
@@ -9,9 +10,12 @@ export async function notify(
   link?: string,
 ) {
   try {
-    await prisma.notification.create({
+    const created = await prisma.notification.create({
       data: { userId, title, content, type, link },
     });
+    const unread = await prisma.notification.count({ where: { userId, readAt: null } });
+    ssePublish(userId, 'notification', created);
+    ssePublish(userId, 'unread', { count: unread });
   } catch (e) {
     console.error('[notify] failed', e);
   }

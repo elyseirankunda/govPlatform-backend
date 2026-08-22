@@ -31,6 +31,9 @@ const updateSchema = z.object({
   progress: z.coerce.number().int().min(0).max(100).optional(),
   status: z.enum(['PLANNED', 'APPROVED', 'IN_PROGRESS', 'COMPLETED', 'SUSPENDED']).optional(),
   beneficiaries: z.coerce.number().int().min(0).optional(),
+  budget: z.coerce.number().min(0).optional(),
+  budgetSpent: z.coerce.number().min(0).optional(),
+  fundingSource: z.string().optional().or(z.literal('')),
 });
 
 const updateSchemaStrict = updateSchema.extend({});

@@ -8,6 +8,8 @@ import { authenticate, requirePermission } from '../middleware/auth';
 import { audit } from '../middleware/audit';
 import { getScope, isWithinScope, scopeVillageIds } from '../services/scope.service';
 import { parsePagination, pageResponse } from '../utils/pagination';
+import { toCsv, sendCsv } from '../utils/csv';
+import { sortBy } from '../utils/sort';
 
 const router = Router();
 router.use(authenticate);
@@ -198,13 +200,38 @@ router.get(
     if (scope.sectorId) where.sectorId = scope.sectorId;
     if (scope.cellId) where.cellId = scope.cellId;
     if (scope.villageId) where.villageId = scope.villageId;
+    if (req.query.q) {
+      const q = String(req.query.q);
+      where.OR = [
+        { fullName: { contains: q } },
+        { username: { contains: q } },
+        { email: { contains: q } },
+      ];
+    }
+
+    if (String(req.query.export).toLowerCase() === 'csv') {
+      const rows = await prisma.user.findMany({
+        where,
+        include: { role: true, village: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      const csv = toCsv(
+        ['Full Name', 'Username', 'Role', 'Email', 'Phone', 'Village', 'Status'],
+        rows.map((u) => [u.fullName, u.username, u.role.name, u.email ?? '', u.phone ?? '', u.village?.name ?? '', u.status]),
+      );
+      return sendCsv(res, 'users.csv', csv);
+    }
 
     const [total, items] = await Promise.all([
       prisma.user.count({ where }),
       prisma.user.findMany({
         where,
         include: { role: true, village: { include: { cell: { include: { sector: { include: { district: { include: { province: true } } } } } } } } },
-        orderBy: { createdAt: 'desc' },
+        orderBy: sortBy(req.query.sort, {
+          oldest: { createdAt: 'asc' },
+          name: { fullName: 'asc' },
+          role: [{ role: { name: 'asc' } }, { createdAt: 'desc' }],
+        }),
         skip,
         take: limit,
       }),
@@ -354,14 +381,39 @@ router.get(
     const scope = await getScope(req.user!.id);
     const villageIds = await scopeVillageIds(scope);
     const { page, limit, skip } = parsePagination(req.query as any);
-    const where = { villageId: { in: villageIds } };
+    const where: any = { villageId: { in: villageIds } };
+    if (req.query.q) {
+      const q = String(req.query.q);
+      where.OR = [
+        { code: { contains: q } },
+        { headName: { contains: q } },
+      ];
+    }
+
+    if (String(req.query.export).toLowerCase() === 'csv') {
+      const rows = await prisma.household.findMany({
+        where,
+        include: { village: { select: { name: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      const csv = toCsv(
+        ['Code', 'Head Name', 'Members', 'Ubudehe', 'Village'],
+        rows.map((h) => [h.code, h.headName, h.members, h.ubudehe ?? '', h.village.name]),
+      );
+      return sendCsv(res, 'households.csv', csv);
+    }
 
     const [total, items] = await Promise.all([
       prisma.household.count({ where }),
       prisma.household.findMany({
         where,
         include: { village: true },
-        orderBy: { createdAt: 'desc' },
+        orderBy: sortBy(req.query.sort, {
+          oldest: { createdAt: 'asc' },
+          name: { headName: 'asc' },
+          members: { members: 'desc' },
+          code: { code: 'asc' },
+        }),
         skip,
         take: limit,
       }),
