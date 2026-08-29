@@ -343,6 +343,43 @@ router.put(
   }),
 );
 
+router.delete(
+  '/units/:type/:id',
+  requirePermission('units.manage'),
+  asyncHandler(async (req, res) => {
+    const type = req.params.type as 'district' | 'sector' | 'cell' | 'village';
+    const id = Number(req.params.id);
+    const scope = await getScope(req.user!.id);
+
+    const allowed = {
+      district: scope.level === 1,
+      sector: scope.level === 2,
+      cell: scope.level === 3,
+      village: scope.level === 4,
+    } as Record<string, boolean>;
+    if (!allowed[type]) throw forbidden('You cannot delete at this administrative level');
+
+    // Prevent deleting a unit that still has children
+    if (type === 'district') {
+      const hasChildren = await prisma.sector.findFirst({ where: { districtId: id } });
+      if (hasChildren) throw badRequest('Cannot delete: district still has sectors');
+    } else if (type === 'sector') {
+      const hasChildren = await prisma.cell.findFirst({ where: { sectorId: id } });
+      if (hasChildren) throw badRequest('Cannot delete: sector still has cells');
+    } else if (type === 'cell') {
+      const hasChildren = await prisma.village.findFirst({ where: { cellId: id } });
+      if (hasChildren) throw badRequest('Cannot delete: cell still has villages');
+    } else if (type === 'village') {
+      const hasHouseholds = await prisma.household.findFirst({ where: { villageId: id } });
+      if (hasHouseholds) throw badRequest('Cannot delete: village still has households');
+    }
+
+    await (prisma as any)[type].delete({ where: { id } });
+    await audit(req, 'ADMIN_DELETE_UNIT', type.toUpperCase(), id);
+    res.json({ message: 'Unit deleted' });
+  }),
+);
+
 // ---------------------------------------------------------------------------
 // Households
 // ---------------------------------------------------------------------------
